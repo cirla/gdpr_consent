@@ -1,0 +1,10 @@
+[package]
+name = "gdpr_consent"
+version = "0.1.0"
+authors = ["Tim Cheeseman <tcheeseman@appnexus.com>"]
+
+[dependencies]
+base64 = "0.9"
+bit-set = "0.5"
+bit-vec = "0.5"
+nom = "3.2"
