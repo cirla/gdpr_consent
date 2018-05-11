@@ -3,8 +3,8 @@ use std::convert::From;
 use base64;
 use bit_set::BitSet;
 use bit_vec::BitVec;
+use bitstream_io::{BitWriter, BE};
 use nom;
-use packed_struct::prelude::*;
 
 #[derive(Debug, PartialEq)]
 pub struct V1 {
@@ -32,7 +32,11 @@ pub struct V1 {
     // For each purpose listed in the global vendor list, the presence indicates consent.
     pub purposes_allowed: BitSet,
 
+    // Maximum vendor ID represented in the vendor_consent BitSet.
+    pub max_vendor_id: usize,
+
     // For each vendor id listend in the global vendor list, the presence indicates consent.
+    // Vendor IDs are offset by 1 (e.g. bit 0 corresponds with vendor ID 1.
     pub vendor_consent: BitSet,
 }
 
@@ -59,7 +63,7 @@ impl From<nom::ErrorKind> for Error {
     }
 }
 
-named!( take_version<u8>, bits!( take_bits!( u8, 6 ) ) );
+named!(take_version<u8>, bits!(take_bits!(u8, 6)));
 
 #[derive(Debug, PartialEq)]
 enum Entry {
@@ -79,84 +83,127 @@ enum EntryType {
     Range,
 }
 
-
-named!( parse_v1<V1>,
+named!(
+    parse_v1<V1>,
     bits!(do_parse!(
-        version: tag_bits!(u8, 6, 1)
-    >>  created: map!( take_bits!( u64, 36 ), |x| x*100 )
-    >>  last_updated: map!( take_bits!( u64, 36 ), |x| x*100 )
-    >>  cmp_id: take_bits!( u16, 12 ) 
-    >>  cmp_version: take_bits!( u16, 12 ) 
-    >>  consent_screen: take_bits!( u8, 6 ) 
-    >>  consent_language: map!( pair!( take_bits!( u8, 6 ), take_bits!( u8, 6 ) ), consent_language )
-    >>  vendor_list_version: take_bits!( u16, 12 ) 
-    >>  purposes_allowed: map!( count!( take_bits!(u8, 8), 3 ), |x| BitSet::from_bytes(&x) )
-    >>  max_vendor_id: take_bits!( usize, 16 ) 
-    >>  encoding_type: map!( take_bits!( u8, 1 ), |x| if x == 0 { Encoding::Bitfield } else { Encoding::Range } )
-    >>  bitfield_section: cond!( encoding_type == Encoding::Bitfield, do_parse!(
-            full_bytes: count!( take_bits!( u8, 8 ), max_vendor_id / 8 )
-        >>  leftover_byte: cond!( max_vendor_id % 8 > 0, take_bits!( u8, max_vendor_id % 8 ) )
-        >>  ( match leftover_byte {
-                Some(b) => {
-                    let mut bitset = BitSet::from_bytes(&full_bytes);
-                    bitset.reserve_len_exact(max_vendor_id);
-                    for i in 0..=(max_vendor_id % 8) {
-                        if (i as u8) & b > 0 {
-                            bitset.insert((max_vendor_id / 8) + i);
-                        }
-                    }
-                    bitset
-                },
-                None => BitSet::from_bytes(&full_bytes),
-        })))
-    >>  range_section: cond!( encoding_type == Encoding::Range, do_parse!(
-            default_consent: take_bits!( u8, 1 )
-        >>  num_entries: take_bits!( usize, 12 )
-        >>  entries: count!( do_parse!(
-                entry_type: map!( take_bits!( u8, 1 ), |x| if x == 0 { EntryType::Single } else { EntryType::Range } )
-            >>  single_vendor_id: cond!( entry_type == EntryType::Single, take_bits!( usize, 16 ) )
-            >>  vendor_id_range: cond!( entry_type == EntryType::Range, pair!( take_bits!( usize, 16 ), take_bits!( usize, 16 ) ) )
-            >> ( match entry_type {
-                    EntryType::Single => Entry::Single(single_vendor_id.unwrap()),
-                    EntryType::Range => Entry::Range(vendor_id_range.unwrap().0, vendor_id_range.unwrap().1),
-            })), num_entries )
-        >>  ({
-            let default_consent = default_consent == 1;
-            let mut vendor_consent = BitVec::from_elem(max_vendor_id, default_consent);
-            for e in entries {
-                match e {
-                    Entry::Single(i) => vendor_consent.set(i - 1, !default_consent),
-                    Entry::Range(start, end) => {
-                        for i in start..=end {
-                            vendor_consent.set(i - 1, !default_consent);
-                        }
-                    }
+        version: tag_bits!(u8, 6, 1) >> created: map!(take_bits!(u64, 36), |x| x * 100)
+            >> last_updated: map!(take_bits!(u64, 36), |x| x * 100)
+            >> cmp_id: take_bits!(u16, 12) >> cmp_version: take_bits!(u16, 12)
+            >> consent_screen: take_bits!(u8, 6)
+            >> consent_language:
+                map!(
+                    pair!(take_bits!(u8, 6), take_bits!(u8, 6)),
+                    consent_language
+                ) >> vendor_list_version: take_bits!(u16, 12)
+            >> purposes_allowed: map!(count!(take_bits!(u8, 8), 3), |x| BitSet::from_bytes(&x))
+            >> max_vendor_id: take_bits!(usize, 16)
+            >> encoding_type: map!(take_bits!(u8, 1), |x| {
+                if x == 0 {
+                    Encoding::Bitfield
+                } else {
+                    Encoding::Range
                 }
-            }
+            })
+            >> bitfield_section:
+                cond!(
+                    encoding_type == Encoding::Bitfield,
+                    do_parse!(
+                        full_bytes: count!(take_bits!(u8, 8), max_vendor_id / 8)
+                            >> leftover_byte:
+                                cond!(max_vendor_id % 8 > 0, take_bits!(u8, max_vendor_id % 8))
+                            >> (match leftover_byte {
+                                Some(b) => {
+                                    let mut bitset = BitSet::from_bytes(&full_bytes);
+                                    bitset.reserve_len_exact(max_vendor_id);
+                                    for i in 0..=(max_vendor_id % 8) {
+                                        if (i as u8) & b > 0 {
+                                            bitset.insert((max_vendor_id / 8) + i);
+                                        }
+                                    }
+                                    bitset
+                                }
+                                None => BitSet::from_bytes(&full_bytes),
+                            })
+                    )
+                )
+            >> range_section:
+                cond!(
+                    encoding_type == Encoding::Range,
+                    do_parse!(
+                        default_consent: take_bits!(u8, 1) >> num_entries: take_bits!(usize, 12)
+                            >> entries:
+                                count!(
+                                    do_parse!(
+                                        entry_type: map!(take_bits!(u8, 1), |x| {
+                                            if x == 0 {
+                                                EntryType::Single
+                                            } else {
+                                                EntryType::Range
+                                            }
+                                        })
+                                            >> single_vendor_id:
+                                                cond!(
+                                                    entry_type == EntryType::Single,
+                                                    take_bits!(usize, 16)
+                                                )
+                                            >> vendor_id_range:
+                                                cond!(
+                                                    entry_type == EntryType::Range,
+                                                    pair!(
+                                                        take_bits!(usize, 16),
+                                                        take_bits!(usize, 16)
+                                                    )
+                                                )
+                                            >> (match entry_type {
+                                                EntryType::Single => {
+                                                    Entry::Single(single_vendor_id.unwrap())
+                                                }
+                                                EntryType::Range => Entry::Range(
+                                                    vendor_id_range.unwrap().0,
+                                                    vendor_id_range.unwrap().1,
+                                                ),
+                                            })
+                                    ),
+                                    num_entries
+                                ) >> ({
+                            let default_consent = default_consent == 1;
+                            let mut vendor_consent =
+                                BitVec::from_elem(max_vendor_id, default_consent);
+                            for e in entries {
+                                match e {
+                                    Entry::Single(i) => vendor_consent.set(i - 1, !default_consent),
+                                    Entry::Range(start, end) => {
+                                        for i in start..=end {
+                                            vendor_consent.set(i - 1, !default_consent);
+                                        }
+                                    }
+                                }
+                            }
 
-            BitSet::from_bit_vec(vendor_consent)
-        })))
-    >> (V1 {
-        created: created,
-        last_updated: last_updated,
-        cmp_id: cmp_id,
-        cmp_version: cmp_version,
-        consent_screen: consent_screen,
-        consent_language: consent_language, 
-        vendor_list_version: vendor_list_version,
-        purposes_allowed: purposes_allowed,
-        vendor_consent: match encoding_type {
-            Encoding::Bitfield => bitfield_section.unwrap(),
-            Encoding::Range => range_section.unwrap(),
-        },
-    })))
+                            BitSet::from_bit_vec(vendor_consent)
+                        })
+                    )
+                ) >> (V1 {
+            created: created,
+            last_updated: last_updated,
+            cmp_id: cmp_id,
+            cmp_version: cmp_version,
+            consent_screen: consent_screen,
+            consent_language: consent_language,
+            vendor_list_version: vendor_list_version,
+            purposes_allowed: purposes_allowed,
+            max_vendor_id: max_vendor_id,
+            vendor_consent: match encoding_type {
+                Encoding::Bitfield => bitfield_section.unwrap(),
+                Encoding::Range => range_section.unwrap(),
+            },
+        })
+    ))
 );
 
 const LETTER_OFFSET: u8 = 'a' as u8;
 fn consent_language(letters: (u8, u8)) -> String {
-    String::from_utf8(
-        vec![letters.0 + LETTER_OFFSET,
-             letters.1 + LETTER_OFFSET]).unwrap()
+    String::from_utf8(vec![letters.0 + LETTER_OFFSET, letters.1 + LETTER_OFFSET]).unwrap()
 }
 
 pub fn from_str(raw: &str) -> Result<VendorConsent, Error> {
@@ -164,67 +211,124 @@ pub fn from_str(raw: &str) -> Result<VendorConsent, Error> {
 
     let version = take_version(&bin).to_result()?;
     match version {
-        1 => parse_v1(&bin).map(VendorConsent::V1).to_result().map_err(From::from),
+        1 => parse_v1(&bin)
+            .map(VendorConsent::V1)
+            .to_result()
+            .map_err(From::from),
         v => Err(Error::UnsupportedVersion(v)),
     }
 }
 
-#[derive(PackedStruct)]
-#[packed_struct(bit_numbering="msb0", endian="msb")]
-pub struct PackedConsent {
-    #[packed_field(bits="0..=5")]
-    version: u8,
-    #[packed_field(size_bits="36")]
-    last_updated: u64,
-    #[packed_field(size_bits="36")]
-    created: u64,
-    #[packed_field(size_bits="12")]
-    cmp_id: u16,
-    #[packed_field(size_bits="12")]
-    cmp_version: u16,
-    #[packed_field(size_bits="6")]
-    consent_screen: u8,
-    #[packed_field(element_size_bits="6")]
-    consent_language: [u8; 2],
-    #[packed_field(size_bits="12")]
-    vendor_list_version: u16,
-    #[packed_field(element_size_bits="8")]
-    purposes_allowed: [u8; 3],
-}
-
 fn serialize_v1(v: V1) -> Result<String, Error> {
-    let mut raw = Vec::new();
     if v.consent_language.len() != 2 {
-        return Err(Error::Other(format!("Invalid consent language: {}", v.consent_language)));
+        return Err(Error::Other(format!(
+            "Invalid consent language: {}",
+            v.consent_language
+        )));
     }
 
     let language_bytes = v.consent_language.as_bytes();
     for i in 0..=1 {
         if language_bytes[i] < ('a' as u8) || language_bytes[i] > ('z' as u8) {
-            return Err(Error::Other(format!("Invalid char '{}' in consent language at position {}", language_bytes[i] as char, i)));
+            return Err(Error::Other(format!(
+                "Invalid char '{}' in consent language at position {}",
+                language_bytes[i] as char, i
+            )));
         }
     }
 
-    let language_bytes: Vec<u8> = language_bytes.iter().map(|x| x - ('a' as u8)).collect();
-    let mut consent_language: [u8; 2] = Default::default();
-    consent_language.copy_from_slice(&language_bytes);
-
-    let mut purposes_allowed: [u8; 3] = Default::default();
-    purposes_allowed.copy_from_slice(&v.purposes_allowed.get_ref().to_bytes());
-
-    let packed = PackedConsent {
-        version: 1,
-        last_updated: v.last_updated / 100,
-        created: v.created / 100,
-        cmp_id: v.cmp_id,
-        cmp_version: v.cmp_version,
-        consent_screen: v.consent_screen,
-        consent_language: consent_language,
-        vendor_list_version: v.vendor_list_version,
-        purposes_allowed: purposes_allowed,
+    let default_consent = v.vendor_consent.len() >= v.max_vendor_id / 2;
+    let (range, range_encoded_len) = create_range(&v.vendor_consent, default_consent);
+    let encoding_type = if v.max_vendor_id <= range_encoded_len {
+        0
+    } else {
+        1
     };
-    raw.extend(packed.pack().iter());
+
+    let mut raw = Vec::new();
+    {
+        let mut writer = BitWriter::<BE>::new(&mut raw);
+        writer.write(6, 1).unwrap();
+        writer.write(36, v.last_updated / 100).unwrap();
+        writer.write(36, v.created / 100).unwrap();
+        writer.write(12, v.cmp_id).unwrap();
+        writer.write(12, v.cmp_version).unwrap();
+        writer.write(6, v.consent_screen).unwrap();
+        for b in language_bytes {
+            writer.write(6, b - ('a' as u8)).unwrap();
+        }
+        writer.write(12, v.vendor_list_version).unwrap();
+        writer
+            .write_bytes(&v.purposes_allowed.get_ref().to_bytes())
+            .unwrap();
+        writer.write(16, v.max_vendor_id as u16).unwrap();
+        writer.write(1, encoding_type).unwrap();
+        if encoding_type == 0 {
+            writer
+                .write_bytes(&v.vendor_consent.get_ref().to_bytes())
+                .unwrap();
+        } else {
+            encode_range(writer, range);
+        }
+    }
+
     Ok(base64::encode(&raw))
+}
+
+fn create_range(vendor_consent: &BitSet, default_consent: bool) -> (Vec<Entry>, usize) {
+    let mut range = Vec::new();
+    let mut count = 0;
+
+    let mut start = None;
+    let mut end = None;
+
+    // TODO: handle default_consent == false
+    for i in vendor_consent.iter() {
+        if start.is_none() {
+            start = Some(i);
+            end = Some(i);
+        } else if i == end.unwrap() + 1 {
+            end = Some(i);
+        } else {
+            if start == end {
+                range.push(Entry::Single(start.unwrap() + 1));
+                count += 17;
+            } else {
+                range.push(Entry::Range(start.unwrap() + 1, end.unwrap() + 1));
+                count += 33;
+            }
+            start = None;
+            end = None;
+        }
+    }
+
+    if !start.is_none() {
+        if start == end {
+            range.push(Entry::Single(start.unwrap() + 1));
+            count += 17;
+        } else {
+            range.push(Entry::Range(start.unwrap() + 1, end.unwrap() + 1));
+            count += 33;
+        }
+    }
+
+    (range, count)
+}
+
+fn encode_range(mut writer: BitWriter<BE>, range: Vec<Entry>) {
+    for e in range {
+        match e {
+            Entry::Single(x) => {
+                writer.write(1, 0).unwrap();
+                writer.write(16, x as u16).unwrap();
+            }
+            Entry::Range(s, e) => {
+                writer.write(1, 1).unwrap();
+                writer.write(16, s as u16).unwrap();
+                writer.write(16, e as u16).unwrap();
+            }
+        }
+    }
 }
 
 pub fn to_str(v: VendorConsent) -> Result<String, Error> {
@@ -239,19 +343,22 @@ mod tests {
 
     #[test]
     fn serialize_good() {
-        let v = VendorConsent::V1(
-            V1 {
-                created: 1510081144900,
-                last_updated: 1510081144900,
-                cmp_id: 7,
-                cmp_version: 1,
-                consent_screen: 3,
-                consent_language: "en".to_string(), 
-                vendor_list_version: 8,
-                purposes_allowed: BitSet::from_bytes(&[0b11100000, 0b00000000, 0b00000000]),
-                vendor_consent: BitSet::with_capacity(0),
-            }
-        );
+        let mut vendor_consent = BitVec::from_elem(2011, true);
+        vendor_consent.set(8, false);
+        let vendor_consent = BitSet::from_bit_vec(vendor_consent);
+
+        let v = VendorConsent::V1(V1 {
+            created: 1510081144900,
+            last_updated: 1510081144900,
+            cmp_id: 7,
+            cmp_version: 1,
+            consent_screen: 3,
+            consent_language: "en".to_string(),
+            vendor_list_version: 8,
+            purposes_allowed: BitSet::from_bytes(&[0b11100000, 0b00000000, 0b00000000]),
+            max_vendor_id: 2011,
+            vendor_consent: vendor_consent,
+        });
 
         let serialized = to_str(v).unwrap();
         let expected = "BOEFBi5OEFBi5AHABDENAI4AAAB9vABAASA";
@@ -264,12 +371,12 @@ mod tests {
         let v = from_str(serialized).unwrap();
 
         let expected_purposes_allowed = BitSet::from_bytes(&[0b11100000, 0b00000000, 0b00000000]);
-        
+
         let expected_max_vendor_id = 2011;
         let mut expected_vendor_consent = BitVec::from_elem(expected_max_vendor_id, true);
         expected_vendor_consent.set(8, false);
         let expected_vendor_consent = BitSet::from_bit_vec(expected_vendor_consent);
-        
+
         match v {
             VendorConsent::V1(v1) => {
                 assert_eq!(v1.created, 1510081144900);
@@ -280,6 +387,7 @@ mod tests {
                 assert_eq!(v1.consent_language, "en");
                 assert_eq!(v1.vendor_list_version, 8);
                 assert_eq!(v1.purposes_allowed, expected_purposes_allowed);
+                assert_eq!(v1.max_vendor_id, expected_max_vendor_id);
                 assert_eq!(v1.vendor_consent, expected_vendor_consent);
             }
         }
