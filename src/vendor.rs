@@ -58,12 +58,26 @@ impl From<nom::ErrorKind> for Error {
     }
 }
 
-named!( take_version<u8>, bits!( take_bits!( u8, 6 )) );
+named!( take_version<u8>, bits!( take_bits!( u8, 6 ) ) );
 
+#[derive(Debug, PartialEq)]
 enum Entry {
     Single(usize),
     Range(usize, usize),
 }
+
+#[derive(Debug, PartialEq)]
+enum Encoding {
+    Bitfield,
+    Range,
+}
+
+#[derive(Debug, PartialEq)]
+enum EntryType {
+    Single,
+    Range,
+}
+
 
 named!( parse_v1<V1>,
     bits!(do_parse!(
@@ -77,8 +91,8 @@ named!( parse_v1<V1>,
     >>  vendor_list_version: take_bits!( u16, 12 ) 
     >>  purposes_allowed: map!( count!( take_bits!(u8, 8), 3 ), |x| BitSet::from_bytes(&x) )
     >>  max_vendor_id: take_bits!( usize, 16 ) 
-    >>  encoding_type: take_bits!( u8, 1 )
-    >>  bitfield_section: cond!( encoding_type == 0, do_parse!(
+    >>  encoding_type: map!( take_bits!( u8, 1 ), |x| if x == 0 { Encoding::Bitfield } else { Encoding::Range } )
+    >>  bitfield_section: cond!( encoding_type == Encoding::Bitfield, do_parse!(
             full_bytes: count!( take_bits!( u8, 8 ), max_vendor_id / 8 )
         >>  leftover_byte: cond!( max_vendor_id % 8 > 0, take_bits!( u8, max_vendor_id % 8 ) )
         >>  ( match leftover_byte {
@@ -94,17 +108,16 @@ named!( parse_v1<V1>,
                 },
                 None => BitSet::from_bytes(&full_bytes),
         })))
-    >>  range_section: cond!( encoding_type == 1, do_parse!(
+    >>  range_section: cond!( encoding_type == Encoding::Range, do_parse!(
             default_consent: take_bits!( u8, 1 )
         >>  num_entries: take_bits!( usize, 12 )
         >>  entries: count!( do_parse!(
-                single_or_range: take_bits!( u8, 1 )
-            >>  single_vendor_id: cond!( single_or_range == 0, take_bits!( usize, 16 ) )
-            >>  vendor_id_range: cond!( single_or_range == 1, tuple!( take_bits!( usize, 16 ), take_bits!( usize, 16 ) ) )
-            >> ( match single_or_range {
-                    0 => Entry::Single(single_vendor_id.unwrap()),
-                    1 => Entry::Range(vendor_id_range.unwrap().0, vendor_id_range.unwrap().1),
-                    _ => panic!("unreachable")
+                entry_type: map!( take_bits!( u8, 1 ), |x| if x == 0 { EntryType::Single } else { EntryType::Range } )
+            >>  single_vendor_id: cond!( entry_type == EntryType::Single, take_bits!( usize, 16 ) )
+            >>  vendor_id_range: cond!( entry_type == EntryType::Range, pair!( take_bits!( usize, 16 ), take_bits!( usize, 16 ) ) )
+            >> ( match entry_type {
+                    EntryType::Single => Entry::Single(single_vendor_id.unwrap()),
+                    EntryType::Range => Entry::Range(vendor_id_range.unwrap().0, vendor_id_range.unwrap().1),
             })), num_entries )
         >>  ({
             let default_consent = default_consent == 1;
@@ -132,9 +145,8 @@ named!( parse_v1<V1>,
         vendor_list_version: vendor_list_version,
         purposes_allowed: purposes_allowed,
         vendor_consent: match encoding_type {
-            0 => bitfield_section.unwrap(),
-            1 => range_section.unwrap(),
-            _ => panic!("unreachable"),
+            Encoding::Bitfield => bitfield_section.unwrap(),
+            Encoding::Range => range_section.unwrap(),
         },
     })))
 );
