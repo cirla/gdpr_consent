@@ -238,6 +238,8 @@ fn serialize_v1(v: V1) -> Result<String, Error> {
         true => create_true_range(&v.vendor_consent),
         false => create_false_range(&v.vendor_consent, v.max_vendor_id),
     };
+
+    // choose smaller encoding
     let encoding_type = if v.max_vendor_id <= range_encoded_len {
         0
     } else {
@@ -281,6 +283,7 @@ fn create_true_range(vendor_consent: &BitSet) -> (Vec<Entry>, usize) {
     let mut start = None;
     let mut end = None;
 
+    // iterate over set (true) values
     for i in vendor_consent.iter() {
         if start.is_none() {
             start = Some(i);
@@ -300,6 +303,7 @@ fn create_true_range(vendor_consent: &BitSet) -> (Vec<Entry>, usize) {
         }
     }
 
+    // close range if open
     if !start.is_none() {
         if start == end {
             range.push(Entry::Single(start.unwrap() + 1));
