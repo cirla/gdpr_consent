@@ -4,6 +4,7 @@ use base64;
 use bit_set::BitSet;
 use bit_vec::BitVec;
 use nom;
+use packed_struct::prelude::*;
 
 #[derive(Debug, PartialEq)]
 pub struct V1 {
@@ -168,14 +169,68 @@ pub fn from_str(raw: &str) -> Result<VendorConsent, Error> {
     }
 }
 
-pub fn to_str(v: VendorConsent) -> String {
+#[derive(PackedStruct)]
+#[packed_struct(bit_numbering="msb0", endian="msb")]
+pub struct PackedConsent {
+    #[packed_field(bits="0..=5")]
+    version: u8,
+    #[packed_field(size_bits="36")]
+    last_updated: u64,
+    #[packed_field(size_bits="36")]
+    created: u64,
+    #[packed_field(size_bits="12")]
+    cmp_id: u16,
+    #[packed_field(size_bits="12")]
+    cmp_version: u16,
+    #[packed_field(size_bits="6")]
+    consent_screen: u8,
+    #[packed_field(element_size_bits="6")]
+    consent_language: [u8; 2],
+    #[packed_field(size_bits="12")]
+    vendor_list_version: u16,
+    #[packed_field(element_size_bits="8")]
+    purposes_allowed: [u8; 3],
+}
+
+fn serialize_v1(v: V1) -> Result<String, Error> {
     let mut raw = Vec::new();
-    
-    match v {
-        VendorConsent::V1(_) => raw.push(1),
+    if v.consent_language.len() != 2 {
+        return Err(Error::Other(format!("Invalid consent language: {}", v.consent_language)));
     }
 
-    base64::encode(&raw)
+    let language_bytes = v.consent_language.as_bytes();
+    for i in 0..=1 {
+        if language_bytes[i] < ('a' as u8) || language_bytes[i] > ('z' as u8) {
+            return Err(Error::Other(format!("Invalid char '{}' in consent language at position {}", language_bytes[i] as char, i)));
+        }
+    }
+
+    let language_bytes: Vec<u8> = language_bytes.iter().map(|x| x - ('a' as u8)).collect();
+    let mut consent_language: [u8; 2] = Default::default();
+    consent_language.copy_from_slice(&language_bytes);
+
+    let mut purposes_allowed: [u8; 3] = Default::default();
+    purposes_allowed.copy_from_slice(&v.purposes_allowed.get_ref().to_bytes());
+
+    let packed = PackedConsent {
+        version: 1,
+        last_updated: v.last_updated / 100,
+        created: v.created / 100,
+        cmp_id: v.cmp_id,
+        cmp_version: v.cmp_version,
+        consent_screen: v.consent_screen,
+        consent_language: consent_language,
+        vendor_list_version: v.vendor_list_version,
+        purposes_allowed: purposes_allowed,
+    };
+    raw.extend(packed.pack().iter());
+    Ok(base64::encode(&raw))
+}
+
+pub fn to_str(v: VendorConsent) -> Result<String, Error> {
+    match v {
+        VendorConsent::V1(v1) => serialize_v1(v1),
+    }
 }
 
 #[cfg(test)]
@@ -198,7 +253,7 @@ mod tests {
             }
         );
 
-        let serialized = to_str(v);
+        let serialized = to_str(v).unwrap();
         let expected = "BOEFBi5OEFBi5AHABDENAI4AAAB9vABAASA";
         assert_eq!(serialized, expected);
     }
