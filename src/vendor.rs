@@ -92,8 +92,8 @@ named!(
             >> consent_screen: take_bits!(u8, 6)
             >> consent_language:
                 map!(
-                    pair!(take_bits!(u8, 6), take_bits!(u8, 6)),
-                    consent_language
+                    count!(map!(take_bits!(u8, 6), |x| x + ('a' as u8)), 2),
+                    |x| String::from_utf8(x).unwrap()
                 ) >> vendor_list_version: take_bits!(u16, 12)
             >> purposes_allowed: map!(count!(take_bits!(u8, 8), 3), |x| BitSet::from_bytes(&x))
             >> max_vendor_id: take_bits!(usize, 16)
@@ -201,11 +201,6 @@ named!(
     ))
 );
 
-const LETTER_OFFSET: u8 = 'a' as u8;
-fn consent_language(letters: (u8, u8)) -> String {
-    String::from_utf8(vec![letters.0 + LETTER_OFFSET, letters.1 + LETTER_OFFSET]).unwrap()
-}
-
 pub fn from_str(raw: &str) -> Result<VendorConsent, Error> {
     let bin = base64::decode(raw)?;
 
@@ -237,8 +232,12 @@ fn serialize_v1(v: V1) -> Result<String, Error> {
         }
     }
 
-    let default_consent = v.vendor_consent.len() >= v.max_vendor_id / 2;
-    let (range, range_encoded_len) = create_range(&v.vendor_consent, default_consent);
+    // default to false if more than half of bits are set
+    let default_consent = v.vendor_consent.len() < v.max_vendor_id / 2;
+    let (range, range_encoded_len) = match default_consent {
+        true => create_true_range(&v.vendor_consent),
+        false => create_false_range(&v.vendor_consent, v.max_vendor_id),
+    };
     let encoding_type = if v.max_vendor_id <= range_encoded_len {
         0
     } else {
@@ -268,21 +267,20 @@ fn serialize_v1(v: V1) -> Result<String, Error> {
                 .write_bytes(&v.vendor_consent.get_ref().to_bytes())
                 .unwrap();
         } else {
-            encode_range(writer, range);
+            encode_range(writer, default_consent, range);
         }
     }
 
     Ok(base64::encode(&raw))
 }
 
-fn create_range(vendor_consent: &BitSet, default_consent: bool) -> (Vec<Entry>, usize) {
+fn create_true_range(vendor_consent: &BitSet) -> (Vec<Entry>, usize) {
     let mut range = Vec::new();
-    let mut count = 0;
+    let mut count = 13; // 1 + 12
 
     let mut start = None;
     let mut end = None;
 
-    // TODO: handle default_consent == false
     for i in vendor_consent.iter() {
         if start.is_none() {
             start = Some(i);
@@ -292,10 +290,10 @@ fn create_range(vendor_consent: &BitSet, default_consent: bool) -> (Vec<Entry>, 
         } else {
             if start == end {
                 range.push(Entry::Single(start.unwrap() + 1));
-                count += 17;
+                count += 17; // 1 + 16
             } else {
                 range.push(Entry::Range(start.unwrap() + 1, end.unwrap() + 1));
-                count += 33;
+                count += 33; // 1 + 16 + 16
             }
             start = None;
             end = None;
@@ -305,17 +303,26 @@ fn create_range(vendor_consent: &BitSet, default_consent: bool) -> (Vec<Entry>, 
     if !start.is_none() {
         if start == end {
             range.push(Entry::Single(start.unwrap() + 1));
-            count += 17;
+            count += 17; // 1 + 16
         } else {
             range.push(Entry::Range(start.unwrap() + 1, end.unwrap() + 1));
-            count += 33;
+            count += 33; // 1 + 16 + 16
         }
     }
 
     (range, count)
 }
 
-fn encode_range(mut writer: BitWriter<BE>, range: Vec<Entry>) {
+fn create_false_range(vendor_consent: &BitSet, max_vendor_id: usize) -> (Vec<Entry>, usize) {
+    let mut inverse = BitSet::from_bit_vec(BitVec::from_elem(max_vendor_id, true));
+    inverse.difference_with(vendor_consent);
+    create_true_range(&inverse)
+}
+
+fn encode_range(mut writer: BitWriter<BE>, default_consent: bool, range: Vec<Entry>) {
+    writer.write_bit(default_consent).unwrap();
+    writer.write(12, range.len() as u16).unwrap();
+
     for e in range {
         match e {
             Entry::Single(x) => {
