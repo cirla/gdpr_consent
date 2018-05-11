@@ -78,10 +78,22 @@ named!( parse_v1<V1>,
     >>  purposes_allowed: map!( count!( take_bits!(u8, 8), 3 ), |x| BitSet::from_bytes(&x) )
     >>  max_vendor_id: take_bits!( usize, 16 ) 
     >>  encoding_type: take_bits!( u8, 1 )
-    >>  bitfield_section: cond!( encoding_type == 0,
-            // TODO: ignores leftover bits when max_vendor_id is not a multiple of 8
-            map!( count!( take_bits!( u8, 8 ), (max_vendor_id) / 8), |x| BitSet::from_bytes(&x) )
-        )
+    >>  bitfield_section: cond!( encoding_type == 0, do_parse!(
+            full_bytes: count!( take_bits!( u8, 8 ), max_vendor_id / 8 )
+        >>  leftover_byte: cond!( max_vendor_id % 8 > 0, take_bits!( u8, max_vendor_id % 8 ) )
+        >>  ( match leftover_byte {
+                Some(b) => {
+                    let mut bitset = BitSet::from_bytes(&full_bytes);
+                    bitset.reserve_len_exact(max_vendor_id);
+                    for i in 0..=(max_vendor_id % 8) {
+                        if (i as u8) & b > 0 {
+                            bitset.insert((max_vendor_id / 8) + i);
+                        }
+                    }
+                    bitset
+                },
+                None => BitSet::from_bytes(&full_bytes),
+        })))
     >>  range_section: cond!( encoding_type == 1, do_parse!(
             default_consent: take_bits!( u8, 1 )
         >>  num_entries: take_bits!( usize, 12 )
@@ -89,13 +101,11 @@ named!( parse_v1<V1>,
                 single_or_range: take_bits!( u8, 1 )
             >>  single_vendor_id: cond!( single_or_range == 0, take_bits!( usize, 16 ) )
             >>  vendor_id_range: cond!( single_or_range == 1, tuple!( take_bits!( usize, 16 ), take_bits!( usize, 16 ) ) )
-            >> (
-                match single_or_range {
+            >> ( match single_or_range {
                     0 => Entry::Single(single_vendor_id.unwrap()),
                     1 => Entry::Range(vendor_id_range.unwrap().0, vendor_id_range.unwrap().1),
                     _ => panic!("unreachable")
-                }
-            )), num_entries )
+            })), num_entries )
         >>  ({
             let default_consent = default_consent == 1;
             let mut vendor_consent = BitVec::from_elem(max_vendor_id, default_consent);
@@ -103,7 +113,7 @@ named!( parse_v1<V1>,
                 match e {
                     Entry::Single(i) => vendor_consent.set(i - 1, !default_consent),
                     Entry::Range(start, end) => {
-                        for i in start..end+1 {
+                        for i in start..=end {
                             vendor_consent.set(i - 1, !default_consent);
                         }
                     }
