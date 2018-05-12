@@ -250,8 +250,8 @@ fn serialize_v1(v: V1) -> Result<String, Error> {
     {
         let mut writer = BitWriter::<BE>::new(&mut raw);
         writer.write(6, 1).unwrap();
-        writer.write(36, v.last_updated / 100).unwrap();
         writer.write(36, v.created / 100).unwrap();
+        writer.write(36, v.last_updated / 100).unwrap();
         writer.write(12, v.cmp_id).unwrap();
         writer.write(12, v.cmp_version).unwrap();
         writer.write(6, v.consent_screen).unwrap();
