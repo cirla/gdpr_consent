@@ -232,11 +232,11 @@ fn serialize_v1(v: V1) -> Result<String, Error> {
         }
     }
 
-    // default to false if more than half of bits are set
-    let default_consent = v.vendor_consent.len() < v.max_vendor_id / 2;
+    // default to true if more than half of bits are set
+    let default_consent = v.vendor_consent.len() >= v.max_vendor_id / 2;
     let (range, range_encoded_len) = match default_consent {
-        true => create_true_range(&v.vendor_consent),
-        false => create_false_range(&v.vendor_consent, v.max_vendor_id),
+        false => create_true_range(&v.vendor_consent),
+        true => create_false_range(&v.vendor_consent, v.max_vendor_id),
     };
 
     // choose smaller encoding
@@ -268,12 +268,13 @@ fn serialize_v1(v: V1) -> Result<String, Error> {
             writer
                 .write_bytes(&v.vendor_consent.get_ref().to_bytes())
                 .unwrap();
+            writer.byte_align().unwrap();
         } else {
             encode_range(writer, default_consent, range);
         }
     }
 
-    Ok(base64::encode(&raw))
+    Ok(base64::encode_config(&raw, base64::URL_SAFE_NO_PAD))
 }
 
 fn create_true_range(vendor_consent: &BitSet) -> (Vec<Entry>, usize) {
@@ -340,6 +341,8 @@ fn encode_range(mut writer: BitWriter<BE>, default_consent: bool, range: Vec<Ent
             }
         }
     }
+
+    writer.byte_align().unwrap();
 }
 
 pub fn to_str(v: VendorConsent) -> Result<String, Error> {
