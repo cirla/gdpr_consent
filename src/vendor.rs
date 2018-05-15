@@ -86,12 +86,6 @@ enum Entry {
     Range(usize, usize),
 }
 
-#[derive(Debug, PartialEq)]
-enum Encoding {
-    Bitfield,
-    Range,
-}
-
 fn parse_v1_bitfield(
     mut reader: BitReader<BigEndian>,
     max_vendor_id: usize,
@@ -157,14 +151,9 @@ fn parse_v1(mut reader: BitReader<BigEndian>) -> Result<V1, Error> {
 
     let max_vendor_id = reader.read::<u16>(16)? as usize;
 
-    let encoding_type = match reader.read::<u8>(1)? {
-        0 => Encoding::Bitfield,
-        _ => Encoding::Range,
-    };
-
-    let vendor_consent = match encoding_type {
-        Encoding::Bitfield => parse_v1_bitfield(reader, max_vendor_id)?,
-        Encoding::Range => parse_v1_range(reader, max_vendor_id)?,
+    let vendor_consent = match reader.read::<u8>(1)? {
+        0 => parse_v1_bitfield(reader, max_vendor_id)?,
+        _ => parse_v1_range(reader, max_vendor_id)?,
     };
 
     Ok(V1 {
