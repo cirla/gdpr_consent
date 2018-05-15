@@ -7,6 +7,7 @@
 // except according to those terms.
 
 use std::convert::From;
+use std::io;
 
 use base64;
 use bit_set::BitSet;
@@ -52,11 +53,18 @@ pub enum VendorConsent {
     V1(V1),
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug)]
 pub enum Error {
     Base64DecodeError(base64::DecodeError),
     UnsupportedVersion(u8),
+    IoError(io::Error),
     Other(String),
+}
+
+impl From<io::Error> for Error {
+    fn from(e: io::Error) -> Error {
+        Error::IoError(e)
+    }
 }
 
 impl From<base64::DecodeError> for Error {
@@ -257,28 +265,24 @@ fn serialize_v1(v: V1) -> Result<String, Error> {
     let mut raw = Vec::new();
     {
         let mut writer = BitWriter::<BE>::new(&mut raw);
-        writer.write(6, 1).unwrap();
-        writer.write(36, v.created / 100).unwrap();
-        writer.write(36, v.last_updated / 100).unwrap();
-        writer.write(12, v.cmp_id).unwrap();
-        writer.write(12, v.cmp_version).unwrap();
-        writer.write(6, v.consent_screen).unwrap();
+        writer.write(6, 1)?;
+        writer.write(36, v.created / 100)?;
+        writer.write(36, v.last_updated / 100)?;
+        writer.write(12, v.cmp_id)?;
+        writer.write(12, v.cmp_version)?;
+        writer.write(6, v.consent_screen)?;
         for b in language_bytes {
-            writer.write(6, b - ('a' as u8)).unwrap();
+            writer.write(6, b - ('a' as u8))?;
         }
-        writer.write(12, v.vendor_list_version).unwrap();
-        writer
-            .write_bytes(&v.purposes_allowed.get_ref().to_bytes())
-            .unwrap();
-        writer.write(16, v.max_vendor_id as u16).unwrap();
-        writer.write(1, encoding_type).unwrap();
+        writer.write(12, v.vendor_list_version)?;
+        writer.write_bytes(&v.purposes_allowed.get_ref().to_bytes())?;
+        writer.write(16, v.max_vendor_id as u16)?;
+        writer.write(1, encoding_type)?;
         if encoding_type == 0 {
-            writer
-                .write_bytes(&v.vendor_consent.get_ref().to_bytes())
-                .unwrap();
-            writer.byte_align().unwrap();
+            writer.write_bytes(&v.vendor_consent.get_ref().to_bytes())?;
+            writer.byte_align()?;
         } else {
-            encode_range(writer, default_consent, range);
+            encode_range(writer, default_consent, range)?;
         }
     }
 
@@ -332,25 +336,27 @@ fn create_false_range(vendor_consent: &BitSet, max_vendor_id: usize) -> (Vec<Ent
     create_true_range(&inverse)
 }
 
-fn encode_range(mut writer: BitWriter<BE>, default_consent: bool, range: Vec<Entry>) {
-    writer.write_bit(default_consent).unwrap();
-    writer.write(12, range.len() as u16).unwrap();
+fn encode_range(mut writer: BitWriter<BE>, default_consent: bool, range: Vec<Entry>) -> Result<(), Error> {
+    writer.write_bit(default_consent)?;
+    writer.write(12, range.len() as u16)?;
 
     for e in range {
         match e {
             Entry::Single(x) => {
-                writer.write(1, 0).unwrap();
-                writer.write(16, x as u16).unwrap();
+                writer.write(1, 0)?;
+                writer.write(16, x as u16)?;
             }
             Entry::Range(s, e) => {
-                writer.write(1, 1).unwrap();
-                writer.write(16, s as u16).unwrap();
-                writer.write(16, e as u16).unwrap();
+                writer.write(1, 1)?;
+                writer.write(16, s as u16)?;
+                writer.write(16, e as u16)?;
             }
         }
     }
 
-    writer.byte_align().unwrap();
+    writer.byte_align()?;
+
+    Ok(())
 }
 
 pub fn to_str(v: VendorConsent) -> Result<String, Error> {
