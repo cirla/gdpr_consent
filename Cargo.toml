@@ -1,6 +1,6 @@
 [package]
 name = "gdpr_consent"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["Tim Cheeseman <tcheeseman@appnexus.com>"]
 description = "GDPR Transparency and Consent Framework SDK for Rust"
 keywords = ["GDPR", "consent"]
