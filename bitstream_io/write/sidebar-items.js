@@ -1,0 +1,1 @@
+initSidebarItems({"struct":[["BitWriter","For writing bit values to an underlying stream in a given endianness."]]});
