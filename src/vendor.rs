@@ -8,12 +8,12 @@
 
 use std::convert::From;
 use std::io;
+use std::string;
 
 use base64;
 use bit_set::BitSet;
 use bit_vec::BitVec;
-use bitstream_io::{BitWriter, BE};
-use nom;
+use bitstream_io::{BigEndian, BitReader, BitWriter};
 
 #[derive(Debug, PartialEq)]
 pub struct V1 {
@@ -58,6 +58,7 @@ pub enum Error {
     Base64DecodeError(base64::DecodeError),
     UnsupportedVersion(u8),
     IoError(io::Error),
+    FromUtf8Error(string::FromUtf8Error),
     Other(String),
 }
 
@@ -67,19 +68,17 @@ impl From<io::Error> for Error {
     }
 }
 
+impl From<string::FromUtf8Error> for Error {
+    fn from(e: string::FromUtf8Error) -> Error {
+        Error::FromUtf8Error(e)
+    }
+}
+
 impl From<base64::DecodeError> for Error {
     fn from(e: base64::DecodeError) -> Error {
         Error::Base64DecodeError(e)
     }
 }
-
-impl From<nom::ErrorKind> for Error {
-    fn from(e: nom::ErrorKind) -> Error {
-        Error::Other(format!("{}", e))
-    }
-}
-
-named!(take_version<u8>, bits!(take_bits!(u8, 6)));
 
 #[derive(Debug, PartialEq)]
 enum Entry {
@@ -93,139 +92,103 @@ enum Encoding {
     Range,
 }
 
-#[derive(Debug, PartialEq)]
-enum EntryType {
-    Single,
-    Range,
+fn parse_v1_bitfield(
+    mut reader: BitReader<BigEndian>,
+    max_vendor_id: usize,
+) -> Result<BitSet, Error> {
+    let buf_size = max_vendor_id / 8 + if max_vendor_id % 8 == 0 { 0 } else { 1 };
+    let mut buf = Vec::with_capacity(buf_size);
+
+    // read full bytes
+    for _ in 0..buf_size {
+        buf.push(reader.read::<u8>(8)?);
+    }
+
+    // read remainder
+    if max_vendor_id % 8 > 0 {
+        buf.push(reader.read::<u8>(max_vendor_id as u32 % 8)?);
+    }
+
+    Ok(BitSet::from_bytes(&buf))
 }
 
-named!(
-    parse_v1<V1>,
-    bits!(do_parse!(
-        version: tag_bits!(u8, 6, 1) >> created: map!(take_bits!(u64, 36), |x| x * 100)
-            >> last_updated: map!(take_bits!(u64, 36), |x| x * 100)
-            >> cmp_id: take_bits!(u16, 12) >> cmp_version: take_bits!(u16, 12)
-            >> consent_screen: take_bits!(u8, 6)
-            >> consent_language:
-                map!(
-                    count!(map!(take_bits!(u8, 6), |x| x + ('a' as u8)), 2),
-                    |x| String::from_utf8(x).unwrap()
-                ) >> vendor_list_version: take_bits!(u16, 12)
-            >> purposes_allowed: map!(count!(take_bits!(u8, 8), 3), |x| BitSet::from_bytes(&x))
-            >> max_vendor_id: take_bits!(usize, 16)
-            >> encoding_type: map!(take_bits!(u8, 1), |x| {
-                if x == 0 {
-                    Encoding::Bitfield
-                } else {
-                    Encoding::Range
-                }
-            })
-            >> bitfield_section:
-                cond!(
-                    encoding_type == Encoding::Bitfield,
-                    do_parse!(
-                        full_bytes: count!(take_bits!(u8, 8), max_vendor_id / 8)
-                            >> leftover_byte:
-                                cond!(max_vendor_id % 8 > 0, take_bits!(u8, max_vendor_id % 8))
-                            >> (match leftover_byte {
-                                Some(b) => {
-                                    let mut bitset = BitSet::from_bytes(&full_bytes);
-                                    bitset.reserve_len_exact(max_vendor_id);
-                                    for i in 0..=(max_vendor_id % 8) {
-                                        if (i as u8) & b > 0 {
-                                            bitset.insert((max_vendor_id / 8) + i);
-                                        }
-                                    }
-                                    bitset
-                                }
-                                None => BitSet::from_bytes(&full_bytes),
-                            })
-                    )
-                )
-            >> range_section:
-                cond!(
-                    encoding_type == Encoding::Range,
-                    do_parse!(
-                        default_consent: take_bits!(u8, 1) >> num_entries: take_bits!(usize, 12)
-                            >> entries:
-                                count!(
-                                    do_parse!(
-                                        entry_type: map!(take_bits!(u8, 1), |x| {
-                                            if x == 0 {
-                                                EntryType::Single
-                                            } else {
-                                                EntryType::Range
-                                            }
-                                        })
-                                            >> single_vendor_id:
-                                                cond!(
-                                                    entry_type == EntryType::Single,
-                                                    take_bits!(usize, 16)
-                                                )
-                                            >> vendor_id_range:
-                                                cond!(
-                                                    entry_type == EntryType::Range,
-                                                    pair!(
-                                                        take_bits!(usize, 16),
-                                                        take_bits!(usize, 16)
-                                                    )
-                                                )
-                                            >> (match entry_type {
-                                                EntryType::Single => {
-                                                    Entry::Single(single_vendor_id.unwrap())
-                                                }
-                                                EntryType::Range => Entry::Range(
-                                                    vendor_id_range.unwrap().0,
-                                                    vendor_id_range.unwrap().1,
-                                                ),
-                                            })
-                                    ),
-                                    num_entries
-                                ) >> ({
-                            let default_consent = default_consent == 1;
-                            let mut vendor_consent =
-                                BitVec::from_elem(max_vendor_id, default_consent);
-                            for e in entries {
-                                match e {
-                                    Entry::Single(i) => vendor_consent.set(i - 1, !default_consent),
-                                    Entry::Range(start, end) => {
-                                        for i in start..=end {
-                                            vendor_consent.set(i - 1, !default_consent);
-                                        }
-                                    }
-                                }
-                            }
+fn parse_v1_range(mut reader: BitReader<BigEndian>, max_vendor_id: usize) -> Result<BitSet, Error> {
+    let default_consent = reader.read::<u8>(1)? == 1;
+    let num_entries = reader.read::<u16>(12)? as usize;
 
-                            BitSet::from_bit_vec(vendor_consent)
-                        })
-                    )
-                ) >> (V1 {
-            created: created,
-            last_updated: last_updated,
-            cmp_id: cmp_id,
-            cmp_version: cmp_version,
-            consent_screen: consent_screen,
-            consent_language: consent_language,
-            vendor_list_version: vendor_list_version,
-            purposes_allowed: purposes_allowed,
-            max_vendor_id: max_vendor_id,
-            vendor_consent: match encoding_type {
-                Encoding::Bitfield => bitfield_section.unwrap(),
-                Encoding::Range => range_section.unwrap(),
-            },
-        })
-    ))
-);
+    let mut buf = BitVec::from_elem(max_vendor_id, default_consent);
+    for _ in 0..num_entries {
+        match reader.read::<u8>(1)? {
+            0 => {
+                let id = reader.read::<u16>(16)? as usize;
+                buf.set(id - 1, !default_consent)
+            }
+            _ => {
+                let start = reader.read::<u16>(16)? as usize;
+                let end = reader.read::<u16>(16)? as usize;
+                for id in start..=end {
+                    buf.set(id - 1, !default_consent);
+                }
+            }
+        }
+    }
+
+    Ok(BitSet::from_bit_vec(buf))
+}
+
+fn parse_v1(mut reader: BitReader<BigEndian>) -> Result<V1, Error> {
+    let created = reader.read::<u64>(36)? * 100;
+    let last_updated = reader.read::<u64>(36)? * 100;
+    let cmp_id = reader.read::<u16>(12)?;
+    let cmp_version = reader.read::<u16>(12)?;
+    let consent_screen = reader.read::<u8>(6)?;
+
+    let mut buf = Vec::with_capacity(2);
+    for _ in 0..2 {
+        buf.push(reader.read::<u8>(6)? + 'a' as u8);
+    }
+    let consent_language = String::from_utf8(buf)?;
+
+    let vendor_list_version = reader.read::<u16>(12)?;
+
+    let mut buf: [u8; 3] = Default::default();
+    reader.read_bytes(&mut buf)?;
+    let purposes_allowed = BitSet::from_bytes(&buf);
+
+    let max_vendor_id = reader.read::<u16>(16)? as usize;
+
+    let encoding_type = match reader.read::<u8>(1)? {
+        0 => Encoding::Bitfield,
+        _ => Encoding::Range,
+    };
+
+    let vendor_consent = match encoding_type {
+        Encoding::Bitfield => parse_v1_bitfield(reader, max_vendor_id)?,
+        Encoding::Range => parse_v1_range(reader, max_vendor_id)?,
+    };
+
+    Ok(V1 {
+        created: created,
+        last_updated: last_updated,
+        cmp_id: cmp_id,
+        cmp_version: cmp_version,
+        consent_screen: consent_screen,
+        consent_language: consent_language,
+        vendor_list_version: vendor_list_version,
+        purposes_allowed: purposes_allowed,
+        max_vendor_id: max_vendor_id,
+        vendor_consent: vendor_consent,
+    })
+}
 
 pub fn from_str(raw: &str) -> Result<VendorConsent, Error> {
-    let bin = base64::decode(raw)?;
+    let data = base64::decode(raw)?;
+    let mut cursor = io::Cursor::new(&data);
+    let mut reader = BitReader::<BigEndian>::new(&mut cursor);
 
-    let version = take_version(&bin).to_result()?;
+    let version = reader.read::<u8>(6)?;
     match version {
-        1 => parse_v1(&bin)
-            .map(VendorConsent::V1)
-            .to_result()
-            .map_err(From::from),
+        1 => parse_v1(reader).map(VendorConsent::V1),
         v => Err(Error::UnsupportedVersion(v)),
     }
 }
@@ -264,7 +227,7 @@ fn serialize_v1(v: V1) -> Result<String, Error> {
 
     let mut raw = Vec::new();
     {
-        let mut writer = BitWriter::<BE>::new(&mut raw);
+        let mut writer = BitWriter::<BigEndian>::new(&mut raw);
         writer.write(6, 1)?;
         writer.write(36, v.created / 100)?;
         writer.write(36, v.last_updated / 100)?;
@@ -336,7 +299,11 @@ fn create_false_range(vendor_consent: &BitSet, max_vendor_id: usize) -> (Vec<Ent
     create_true_range(&inverse)
 }
 
-fn encode_range(mut writer: BitWriter<BE>, default_consent: bool, range: Vec<Entry>) -> Result<(), Error> {
+fn encode_range(
+    mut writer: BitWriter<BigEndian>,
+    default_consent: bool,
+    range: Vec<Entry>,
+) -> Result<(), Error> {
     writer.write_bit(default_consent)?;
     writer.write(12, range.len() as u16)?;
 
