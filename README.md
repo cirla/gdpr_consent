@@ -1,5 +1,6 @@
 [![Travis Build Status](https://travis-ci.org/cirla/gdpr_consent.svg?branch=master)](https://travis-ci.org/cirla/gdpr_consent)
 [![AppVeyor Build status](https://ci.appveyor.com/api/projects/status/0uccoj1xrgyudp4p/branch/master?svg=true)](https://ci.appveyor.com/project/cirla/gdpr-consent/branch/master)
+[![Coverage Status](https://coveralls.io/repos/github/cirla/gdpr_consent/badge.svg?branch=master)](https://coveralls.io/github/cirla/gdpr_consent?branch=master)
 [![crates.io](https://img.shields.io/crates/v/gdpr_consent.svg)](https://crates.io/crates/gdpr_consent)
 [![docs.rs](https://docs.rs/gdpr_consent/badge.svg)](https://docs.rs/gdpr_consent)
 
