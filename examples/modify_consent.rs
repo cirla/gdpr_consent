@@ -1,6 +1,14 @@
+// Copyright (c) 2018 The gdpr_consent authors
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
 extern crate gdpr_consent;
 
-use gdpr_consent::vendor::{from_str, to_str, VendorConsent};
+use gdpr_consent::vendor_consent::{from_str, to_str, VendorConsent};
 
 fn main() {
     let serialized = "BOEFBi5OEFBi5AHABDENAI4AAAB9vABAASA";

@@ -11,7 +11,7 @@
 ```rust
 extern crate gdpr_consent;
 
-use gdpr_consent::vendor::{from_str, to_str, VendorConsent};
+use gdpr_consent::vendor_consent::{from_str, to_str, VendorConsent};
 
 fn main() {
     let serialized = "BOEFBi5OEFBi5AHABDENAI4AAAB9vABAASA";
