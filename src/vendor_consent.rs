@@ -7,6 +7,8 @@
 // except according to those terms.
 
 use std::convert::From;
+use std::error;
+use std::fmt::{self, Display};
 use std::io;
 use std::string;
 
@@ -61,6 +63,40 @@ pub enum Error {
     IoError(io::Error),
     FromUtf8Error(string::FromUtf8Error),
     Other(String),
+}
+
+impl error::Error for Error {
+    fn description(&self) -> &str {
+        match self {
+            Error::Base64DecodeError(ref err) => err.description(),
+            Error::UnsupportedVersion(_) => "Unsupported version",
+            Error::IoError(ref err) => err.description(),
+            Error::FromUtf8Error(ref err) => err.description(),
+            Error::Other(msg) => msg,
+        }
+    }
+
+    fn cause(&self) -> Option<&error::Error> {
+        match self {
+            Error::Base64DecodeError(ref err) => Some(err),
+            Error::UnsupportedVersion(_) => None,
+            Error::IoError(ref err) => Some(err),
+            Error::FromUtf8Error(ref err) => Some(err),
+            Error::Other(_) => None,
+        }
+    }
+}
+
+impl Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Error::Base64DecodeError(ref err) => Display::fmt(err, f),
+            Error::UnsupportedVersion(v) => write!(f, "Unsupported version: {}", v),
+            Error::IoError(ref err) => Display::fmt(err, f),
+            Error::FromUtf8Error(ref err) => Display::fmt(err, f),
+            Error::Other(msg) => Display::fmt(msg, f),
+        }
+    }
 }
 
 impl From<io::Error> for Error {
