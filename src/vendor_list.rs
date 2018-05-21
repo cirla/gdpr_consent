@@ -37,7 +37,9 @@ pub struct Vendor {
 }
 
 impl HasId<u16> for Vendor {
-    fn id(&self) -> u16 { self.id }
+    fn id(&self) -> u16 {
+        self.id
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -48,7 +50,9 @@ pub struct Purpose {
 }
 
 impl HasId<u8> for Purpose {
-    fn id(&self) -> u8 { self.id }
+    fn id(&self) -> u8 {
+        self.id
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -59,27 +63,32 @@ pub struct Feature {
 }
 
 impl HasId<u8> for Feature {
-    fn id(&self) -> u8 { self.id }
+    fn id(&self) -> u8 {
+        self.id
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct VendorList {
     #[serde(rename = "vendorListVersion")]
     pub version: u16,
-    
+
     #[serde(rename = "lastUpdated")]
     pub last_updated: DateTime<Utc>,
-    
-    #[serde(serialize_with = "serialize_id_map_as_list",
-            deserialize_with = "deserialize_list_as_id_map")]
+
+    #[serde(
+        serialize_with = "serialize_id_map_as_list", deserialize_with = "deserialize_list_as_id_map"
+    )]
     pub purposes: HashMap<u8, Purpose>,
-    
-    #[serde(serialize_with = "serialize_id_map_as_list",
-            deserialize_with = "deserialize_list_as_id_map")]
+
+    #[serde(
+        serialize_with = "serialize_id_map_as_list", deserialize_with = "deserialize_list_as_id_map"
+    )]
     pub features: HashMap<u8, Feature>,
-    
-    #[serde(serialize_with = "serialize_id_map_as_list",
-            deserialize_with = "deserialize_list_as_id_map")]
+
+    #[serde(
+        serialize_with = "serialize_id_map_as_list", deserialize_with = "deserialize_list_as_id_map"
+    )]
     pub vendors: HashMap<u16, Vendor>,
 }
 
@@ -121,18 +130,20 @@ impl From<serde_json::Error> for Error {
 }
 
 fn deserialize_list_as_id_map<'de, D, K, V>(deserializer: D) -> Result<HashMap<K, V>, D::Error>
-    where D: serde::Deserializer<'de>,
-          K: Eq + hash::Hash,
-          V: HasId<K> + serde::Deserialize<'de>,
+where
+    D: serde::Deserializer<'de>,
+    K: Eq + hash::Hash,
+    V: HasId<K> + serde::Deserialize<'de>,
 {
     let values: Vec<V> = serde::Deserialize::deserialize(deserializer)?;
     Ok(values.into_iter().map(|v| (v.id(), v)).collect())
 }
 
 fn serialize_id_map_as_list<S, K, V>(map: &HashMap<K, V>, serializer: S) -> Result<S::Ok, S::Error>
-    where S: serde::Serializer,
-          K: Eq + hash::Hash + cmp::Ord,
-          V: HasId<K> + serde::Serialize,
+where
+    S: serde::Serializer,
+    K: Eq + hash::Hash + cmp::Ord,
+    V: HasId<K> + serde::Serialize,
 {
     let mut values: Vec<&V> = map.iter().map(|(_, v)| v).collect();
     values.sort_by_key(|v| v.id());
@@ -140,7 +151,7 @@ fn serialize_id_map_as_list<S, K, V>(map: &HashMap<K, V>, serializer: S) -> Resu
     let mut seq = serializer.serialize_seq(Some(map.len()))?;
     for element in values.iter() {
         seq.serialize_element(element)?;
-    }        
+    }
     seq.end()
 }
 
@@ -154,13 +165,9 @@ pub fn to_json(v: VendorList) -> Result<String, Error> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    #[test]
+    fn serialize_good() {}
 
     #[test]
-    fn serialize_good() {
-    }
-    
-    #[test]
-    fn deserialize_good() {
-    }
+    fn deserialize_good() {}
 }

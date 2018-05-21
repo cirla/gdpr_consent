@@ -14,14 +14,15 @@ use base64;
 use bit_set::BitSet;
 use bit_vec::BitVec;
 use bitstream_io::{BigEndian, BitReader, BitWriter};
+use chrono::{DateTime, TimeZone, Utc};
 
 #[derive(Debug, PartialEq)]
 pub struct V1 {
     // Epoch ms when consent string was first created
-    pub created: u64,
+    pub created: DateTime<Utc>,
 
     // Epoch ms when consent string was last updated
-    pub last_updated: u64,
+    pub last_updated: DateTime<Utc>,
 
     // Consent Manager Provider ID that last updated the consent string
     pub cmp_id: u16,
@@ -130,9 +131,21 @@ fn parse_v1_range(mut reader: BitReader<BigEndian>, max_vendor_id: usize) -> Res
     Ok(BitSet::from_bit_vec(buf))
 }
 
+const DECISECS_IN_SEC: i64 = 10;
+const MILLISECS_IN_DECISEC: u32 = 100;
+const NANOSECS_IN_DECISEC: u32 = 100_000_000;
+
 fn parse_v1(mut reader: BitReader<BigEndian>) -> Result<V1, Error> {
-    let created = reader.read::<u64>(36)? * 100;
-    let last_updated = reader.read::<u64>(36)? * 100;
+    let created = reader.read::<i64>(36)?;
+    let created = Utc.timestamp(
+        created / DECISECS_IN_SEC,
+        (created % DECISECS_IN_SEC) as u32 * NANOSECS_IN_DECISEC,
+    );
+    let last_updated = reader.read::<i64>(36)?;
+    let last_updated = Utc.timestamp(
+        last_updated / DECISECS_IN_SEC,
+        (last_updated % DECISECS_IN_SEC) as u32 * NANOSECS_IN_DECISEC,
+    );
     let cmp_id = reader.read::<u16>(12)?;
     let cmp_version = reader.read::<u16>(12)?;
     let consent_screen = reader.read::<u8>(6)?;
@@ -218,8 +231,16 @@ fn serialize_v1(v: V1) -> Result<String, Error> {
     {
         let mut writer = BitWriter::<BigEndian>::new(&mut raw);
         writer.write(6, 1)?;
-        writer.write(36, v.created / 100)?;
-        writer.write(36, v.last_updated / 100)?;
+        writer.write(
+            36,
+            v.created.timestamp() * 10
+                + (v.created.timestamp_subsec_millis() / MILLISECS_IN_DECISEC) as i64,
+        )?;
+        writer.write(
+            36,
+            v.last_updated.timestamp() * 10
+                + (v.last_updated.timestamp_subsec_millis() / MILLISECS_IN_DECISEC) as i64,
+        )?;
         writer.write(12, v.cmp_id)?;
         writer.write(12, v.cmp_version)?;
         writer.write(6, v.consent_screen)?;
@@ -332,8 +353,8 @@ mod tests {
         let vendor_consent = BitSet::from_bit_vec(vendor_consent);
 
         let v = VendorConsent::V1(V1 {
-            created: 1510081144900,
-            last_updated: 1510081144900,
+            created: "2017-11-07T19:15:55.4Z".parse().unwrap(),
+            last_updated: "2017-11-07T19:15:55.4Z".parse().unwrap(),
             cmp_id: 7,
             cmp_version: 1,
             consent_screen: 3,
@@ -345,13 +366,13 @@ mod tests {
         });
 
         let serialized = to_str(v).unwrap();
-        let expected = "BOEFBi5OEFBi5AHABDENAI4AAAB9vABAASA";
+        let expected = "BOEFEAyOEFEAyAHABDENAI4AAAB9vABAASA";
         assert_eq!(serialized, expected);
     }
 
     #[test]
     fn deserialize_good() {
-        let serialized = "BOEFBi5OEFBi5AHABDENAI4AAAB9vABAASA";
+        let serialized = "BOEFEAyOEFEAyAHABDENAI4AAAB9vABAASA";
         let v = from_str(serialized).unwrap();
 
         let expected_purposes_allowed = BitSet::from_bytes(&[0b11100000, 0b00000000, 0b00000000]);
@@ -363,8 +384,8 @@ mod tests {
 
         match v {
             VendorConsent::V1(v1) => {
-                assert_eq!(v1.created, 1510081144900);
-                assert_eq!(v1.last_updated, 1510081144900);
+                assert_eq!(Ok(v1.created), "2017-11-07T19:15:55.4Z".parse());
+                assert_eq!(Ok(v1.last_updated), "2017-11-07T19:15:55.4Z".parse());
                 assert_eq!(v1.cmp_id, 7);
                 assert_eq!(v1.cmp_version, 1);
                 assert_eq!(v1.consent_screen, 3);

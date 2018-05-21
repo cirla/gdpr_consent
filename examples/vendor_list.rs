@@ -9,13 +9,13 @@
 extern crate gdpr_consent;
 extern crate reqwest;
 
+use gdpr_consent::vendor_list::from_json;
 use std::error::Error;
-use gdpr_consent::vendor_list::{from_json};
 
 fn main() -> Result<(), Box<Error>> {
     let json = reqwest::get("https://vendorlist.consensu.org/vendorlist.json")?.text()?;
     let vendor_list = from_json(&json)?;
-    
+
     match vendor_list.vendors.get(&32) {
         Some(appnexus) => println!("{:?}", appnexus),
         None => println!("AppNexus was not present in the vendor list."),
