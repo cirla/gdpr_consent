@@ -10,5 +10,11 @@ extern crate base64;
 extern crate bit_set;
 extern crate bit_vec;
 extern crate bitstream_io;
+extern crate chrono;
+extern crate serde;
+#[macro_use]
+extern crate serde_derive;
+extern crate serde_json;
 
-pub mod vendor;
+pub mod vendor_consent;
+pub mod vendor_list;
