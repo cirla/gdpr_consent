@@ -36,7 +36,7 @@ fn main() -> Result<(), Box<Error>> {
 extern crate chrono;
 extern crate gdpr_consent;
 
-use gdpr_consent::vendor_consent::{from_str, to_str, VendorConsent};
+use gdpr_consent::vendor_consent::VendorConsent;
 use std::error::Error;
 
 fn main() -> Result<(), Box<Error>> {
