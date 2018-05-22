@@ -10,6 +10,7 @@ use std::convert::From;
 use std::error;
 use std::fmt::{self, Display};
 use std::io;
+use std::str::FromStr;
 use std::string;
 
 use base64;
@@ -54,6 +55,14 @@ pub struct V1 {
 
 pub enum VendorConsent {
     V1(V1),
+}
+
+impl VendorConsent {
+    pub fn to_string(&self) -> Result<String, Error> {
+        match self {
+            VendorConsent::V1(ref v1) => serialize_v1(v1),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -219,19 +228,23 @@ fn parse_v1(mut reader: BitReader<BigEndian>) -> Result<V1, Error> {
     })
 }
 
-pub fn from_str(raw: &str) -> Result<VendorConsent, Error> {
-    let data = base64::decode(raw)?;
-    let mut cursor = io::Cursor::new(&data);
-    let mut reader = BitReader::<BigEndian>::new(&mut cursor);
+impl FromStr for VendorConsent {
+    type Err = Error;
 
-    let version = reader.read::<u8>(6)?;
-    match version {
-        1 => parse_v1(reader).map(VendorConsent::V1),
-        v => Err(Error::UnsupportedVersion(v)),
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let data = base64::decode(s)?;
+        let mut cursor = io::Cursor::new(&data);
+        let mut reader = BitReader::<BigEndian>::new(&mut cursor);
+
+        let version = reader.read::<u8>(6)?;
+        match version {
+            1 => parse_v1(reader).map(VendorConsent::V1),
+            v => Err(Error::UnsupportedVersion(v)),
+        }
     }
 }
 
-fn serialize_v1(v: V1) -> Result<String, Error> {
+fn serialize_v1(v: &V1) -> Result<String, Error> {
     if v.consent_language.len() != 2 {
         return Err(Error::Other(format!(
             "Invalid consent language: {}",
@@ -372,12 +385,6 @@ fn encode_range(
     Ok(())
 }
 
-pub fn to_str(v: VendorConsent) -> Result<String, Error> {
-    match v {
-        VendorConsent::V1(v1) => serialize_v1(v1),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -401,15 +408,14 @@ mod tests {
             vendor_consent: vendor_consent,
         });
 
-        let serialized = to_str(v).unwrap();
+        let serialized = v.to_string().unwrap();
         let expected = "BOEFEAyOEFEAyAHABDENAI4AAAB9vABAASA";
         assert_eq!(serialized, expected);
     }
 
     #[test]
     fn deserialize_good() {
-        let serialized = "BOEFEAyOEFEAyAHABDENAI4AAAB9vABAASA";
-        let v = from_str(serialized).unwrap();
+        let v = "BOEFEAyOEFEAyAHABDENAI4AAAB9vABAASA".parse().unwrap();
 
         let expected_purposes_allowed = BitSet::from_bytes(&[0b11100000, 0b00000000, 0b00000000]);
 

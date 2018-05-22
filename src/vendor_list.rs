@@ -12,6 +12,7 @@ use std::convert::From;
 use std::error;
 use std::fmt::{self, Display};
 use std::hash;
+use std::str::FromStr;
 
 use chrono::{DateTime, Utc};
 use serde;
@@ -92,6 +93,20 @@ pub struct VendorList {
     pub vendors: HashMap<u16, Vendor>,
 }
 
+impl VendorList {
+    pub fn to_string(&self) -> Result<String, Error> {
+        serde_json::to_string(self).map_err(From::from)
+    }
+}
+
+impl FromStr for VendorList {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        serde_json::from_str(s).map_err(From::from)
+    }
+}
+
 #[derive(Debug)]
 pub enum Error {
     JsonError(serde_json::Error),
@@ -148,19 +163,11 @@ where
     let mut values: Vec<&V> = map.iter().map(|(_, v)| v).collect();
     values.sort_by_key(|v| v.id());
 
-    let mut seq = serializer.serialize_seq(Some(map.len()))?;
+    let mut seq = serializer.serialize_seq(Some(values.len()))?;
     for element in values.iter() {
         seq.serialize_element(element)?;
     }
     seq.end()
-}
-
-pub fn from_json(raw: &str) -> Result<VendorList, Error> {
-    serde_json::from_str(raw).map_err(From::from)
-}
-
-pub fn to_json(v: VendorList) -> Result<String, Error> {
-    serde_json::to_string(&v).map_err(From::from)
 }
 
 #[cfg(test)]
