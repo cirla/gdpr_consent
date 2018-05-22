@@ -1,1 +1,1 @@
-initSidebarItems({"enum":[["Error",""],["VendorConsent",""]],"fn":[["from_str",""],["to_str",""]],"struct":[["V1",""]]});
+initSidebarItems({"enum":[["Error",""],["VendorConsent",""]],"struct":[["V1",""]]});

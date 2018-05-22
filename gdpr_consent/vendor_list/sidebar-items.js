@@ -1,1 +1,1 @@
-initSidebarItems({"enum":[["Error",""]],"fn":[["from_json",""],["to_json",""]],"struct":[["Feature",""],["Purpose",""],["Vendor",""],["VendorList",""]]});
+initSidebarItems({"enum":[["Error",""]],"struct":[["Feature",""],["Purpose",""],["Vendor",""],["VendorList",""]]});
