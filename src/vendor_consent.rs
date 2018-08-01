@@ -333,8 +333,8 @@ fn create_true_range(vendor_consent: &BitSet) -> (Vec<Entry>, usize) {
                 range.push(Entry::Range(start.unwrap() + 1, end.unwrap() + 1));
                 count += 33; // 1 + 16 + 16
             }
-            start = None;
-            end = None;
+            start = Some(i);
+            end = Some(i);
         }
     }
 
