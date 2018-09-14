@@ -78,17 +78,20 @@ pub struct VendorList {
     pub last_updated: DateTime<Utc>,
 
     #[serde(
-        serialize_with = "serialize_id_map_as_list", deserialize_with = "deserialize_list_as_id_map"
+        serialize_with = "serialize_id_map_as_list",
+        deserialize_with = "deserialize_list_as_id_map"
     )]
     pub purposes: HashMap<u8, Purpose>,
 
     #[serde(
-        serialize_with = "serialize_id_map_as_list", deserialize_with = "deserialize_list_as_id_map"
+        serialize_with = "serialize_id_map_as_list",
+        deserialize_with = "deserialize_list_as_id_map"
     )]
     pub features: HashMap<u8, Feature>,
 
     #[serde(
-        serialize_with = "serialize_id_map_as_list", deserialize_with = "deserialize_list_as_id_map"
+        serialize_with = "serialize_id_map_as_list",
+        deserialize_with = "deserialize_list_as_id_map"
     )]
     pub vendors: HashMap<u16, Vendor>,
 }

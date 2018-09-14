@@ -132,10 +132,12 @@ enum Entry {
     Range(usize, usize),
 }
 
-fn parse_v1_bitfield(
-    mut reader: BitReader<BigEndian>,
+fn parse_v1_bitfield<R>(
+    mut reader: BitReader<R, BigEndian>,
     max_vendor_id: usize,
-) -> Result<BitSet, Error> {
+) -> Result<BitSet, Error>
+where R: io::Read
+{
     let buf_size = max_vendor_id / 8 + if max_vendor_id % 8 == 0 { 0 } else { 1 };
     let mut buf = Vec::with_capacity(buf_size);
 
@@ -152,7 +154,12 @@ fn parse_v1_bitfield(
     Ok(BitSet::from_bytes(&buf))
 }
 
-fn parse_v1_range(mut reader: BitReader<BigEndian>, max_vendor_id: usize) -> Result<BitSet, Error> {
+fn parse_v1_range<R>(
+    mut reader: BitReader<R, BigEndian>,
+    max_vendor_id: usize,
+) -> Result<BitSet, Error>
+where R: io::Read
+{
     let default_consent = reader.read::<u8>(1)? == 1;
     let num_entries = reader.read::<u16>(12)? as usize;
 
@@ -180,7 +187,9 @@ const DECISECS_IN_SEC: i64 = 10;
 const MILLISECS_IN_DECISEC: u32 = 100;
 const NANOSECS_IN_DECISEC: u32 = 100_000_000;
 
-fn parse_v1(mut reader: BitReader<BigEndian>) -> Result<V1, Error> {
+fn parse_v1<R>(mut reader: BitReader<R, BigEndian>) -> Result<V1, Error>
+where R: io::Read
+{
     let created = reader.read::<i64>(36)?;
     let created = Utc.timestamp(
         created / DECISECS_IN_SEC,
@@ -234,7 +243,7 @@ impl FromStr for VendorConsent {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let data = base64::decode(s)?;
         let mut cursor = io::Cursor::new(&data);
-        let mut reader = BitReader::<BigEndian>::new(&mut cursor);
+        let mut reader = BitReader::endian(&mut cursor, BigEndian);
 
         let version = reader.read::<u8>(6)?;
         match version {
@@ -278,7 +287,7 @@ fn serialize_v1(v: &V1) -> Result<String, Error> {
 
     let mut raw = Vec::new();
     {
-        let mut writer = BitWriter::<BigEndian>::new(&mut raw);
+        let mut writer = BitWriter::endian(&mut raw, BigEndian);
         writer.write(6, 1)?;
         writer.write(
             36,
@@ -358,11 +367,13 @@ fn create_false_range(vendor_consent: &BitSet, max_vendor_id: usize) -> (Vec<Ent
     create_true_range(&inverse)
 }
 
-fn encode_range(
-    mut writer: BitWriter<BigEndian>,
+fn encode_range<W>(
+    mut writer: BitWriter<W, BigEndian>,
     default_consent: bool,
     range: Vec<Entry>,
-) -> Result<(), Error> {
+) -> Result<(), Error>
+where W: io::Write
+{
     writer.write_bit(default_consent)?;
     writer.write(12, range.len() as u16)?;
 

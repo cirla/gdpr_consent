@@ -1,31 +1,35 @@
 [package]
-name = "gdpr_consent"
-version = "0.3.0"
 authors = ["Tim Cheeseman <tcheeseman@appnexus.com>"]
-description = "GDPR Transparency and Consent Framework SDK for Rust"
-keywords = ["GDPR", "consent"]
 categories = ["encoding"]
-license = "MIT/Apache-2.0"
+description = "GDPR Transparency and Consent Framework SDK for Rust"
 documentation = "https://docs.rs/gdpr_consent/"
 homepage = "https://cirla.github.io/gdpr_consent"
+keywords = ["GDPR", "consent"]
+license = "MIT/Apache-2.0"
+name = "gdpr_consent"
 repository = "https://github.com/cirla/gdpr_consent"
+version = "0.3.0"
+[badges.appveyor]
+repository = "cirla/gdpr_consent"
 
-[badges]
-travis-ci = { repository = "cirla/gdpr_consent" }
-appveyor = { repository = "cirla/gdpr_consent" }
+[badges.travis-ci]
+repository = "cirla/gdpr_consent"
+
+[dependencies]
+base64 = "0.9.2"
+bit-set = "0.5.0"
+bit-vec = "0.5.0"
+bitstream-io = "0.8.0"
+serde = "1.0.78"
+serde_derive = "1.0.78"
+serde_json = "1.0.27"
+
+[dependencies.chrono]
+features = ["serde"]
+version = "0.4.6"
+
+[dev-dependencies]
+reqwest = "0.8.8"
 
 [lib]
 name = "gdpr_consent"
-
-[dependencies]
-base64 = "0.9"
-bitstream-io = "0.6"
-bit-set = "0.5"
-bit-vec = "0.5"
-chrono = { version = "0.4", features = ["serde"] }
-serde = "1.0"
-serde_derive = "1.0"
-serde_json = "1.0"
-
-[dev-dependencies]
-reqwest = "0.8"
