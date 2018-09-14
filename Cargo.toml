@@ -8,7 +8,7 @@ keywords = ["GDPR", "consent"]
 license = "MIT/Apache-2.0"
 name = "gdpr_consent"
 repository = "https://github.com/cirla/gdpr_consent"
-version = "0.3.0"
+version = "0.4.0"
 [badges.appveyor]
 repository = "cirla/gdpr_consent"
 
